@@ -237,17 +237,17 @@ func NextDate(now time.Time, date string, repeat string) (string, error) {
 		if dataInt <= nowInt {
 			for dataInt <= nowInt {
 				parsedTime = parsedTime.AddDate(1, 0, 0)
-				dataInt, err = strconv.Atoi(parsedTime.Format("20060102"))
+				dataInt, err = strconv.Atoi(parsedTime.Format(format))
 				if err != nil {
 					return "", fmt.Errorf("ошибка преобразования даты в число: %w", err)
 				}
-				nextDate = parsedTime.Format("20060102")
+				nextDate = parsedTime.Format(format)
 			}
 			return nextDate, nil
 		}
 		if dataInt > nowInt {
 			parsedTime = parsedTime.AddDate(1, 0, 0)
-			nextDate = parsedTime.Format("20060102")
+			nextDate = parsedTime.Format(format)
 			return nextDate, nil
 		}
 	}
@@ -274,7 +274,7 @@ func NextDate(now time.Time, date string, repeat string) (string, error) {
 		if dataInt <= nowInt {
 			for dataInt <= nowInt {
 				parsedTime = parsedTime.AddDate(0, 0, repeatDay)
-				dataInt, err = strconv.Atoi(parsedTime.Format("20060102"))
+				dataInt, err = strconv.Atoi(parsedTime.Format(format))
 				if err != nil {
 					return "", fmt.Errorf("ошибка преобразования даты в число: %w", err)
 				}
@@ -284,7 +284,7 @@ func NextDate(now time.Time, date string, repeat string) (string, error) {
 		}
 		if dataInt > nowInt {
 			parsedTime = parsedTime.AddDate(0, 0, repeatDay)
-			nextDate = parsedTime.Format("20060102")
+			nextDate = parsedTime.Format(format)
 			return nextDate, nil
 		}
 	}
@@ -360,6 +360,17 @@ func GetTasks(db *sql.DB) http.HandlerFunc {
 			tasks = append(tasks, task)
 		}
 
+		if err := rows.Err(); err != nil {
+			errPost := map[string]string{"error": "Ошибка при чтении строк из базы данных"}
+			if err := json.NewEncoder(w).Encode(errPost); err != nil {
+				log.Printf("Ошибка кодирования JSON: %v", err)
+				http.Error(w, "Ошибка на стороне сервера", http.StatusInternalServerError)
+				return
+			}
+			log.Printf("Ошибка при чтении строк: %v", err)
+			return
+		}
+
 		response := Tasks{
 			Tasks: tasks,
 		}
@@ -392,7 +403,7 @@ func GetTask(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		query := "SELECT * FROM scheduler WHERE id = ?"
+		query := "SELECT id, date, title, comment, repeat FROM scheduler WHERE id = ?"
 		err := db.QueryRow(query, id).Scan(&task.ID, &task.Date, &task.Title, &task.Comment, &task.Repeat)
 
 		if err != nil {
@@ -466,7 +477,7 @@ func PutTask(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		queryID := "SELECT COUNT(*) FROM scheduler WHERE id = ?"
+		queryID := "SELECT COUNT(*) FROM scheduler WHERE id = ?" // тут идет проверка есть ли в таблице задача по id указанному в параметре
 		var count int
 		err = db.QueryRow(queryID, task.ID).Scan(&count)
 		if err != nil {
@@ -624,7 +635,7 @@ func PutTask(db *sql.DB) http.HandlerFunc {
 		}
 
 		if err != nil {
-			fmt.Print("Задача не найдена")
+			log.Print("Задача не найдена")
 			errPost := map[string]string{"error": "Задача не найдена"}
 			if err := json.NewEncoder(w).Encode(errPost); err != nil {
 				log.Printf("Ошибка кодирования JSON: %v", err)
@@ -844,6 +855,7 @@ func DeleteTask(db *sql.DB) http.HandlerFunc {
 
 func main() {
 	db := db.New()
+	defer db.Close()
 
 	rep := repository.New(db)
 	migration(rep)
@@ -859,6 +871,8 @@ func main() {
 	r.Delete("/api/task", DeleteTask(db))
 
 	r.Handle("/*", http.FileServer(http.Dir("./web")))
+	port := "7540"
+	log.Printf("Сервер запущен на порту: %s", port)
 	err := http.ListenAndServe(":7540", r)
 	if err != nil {
 		fmt.Println(err)
